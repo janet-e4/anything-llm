@@ -177,8 +177,8 @@ class Provider {
           configuration: {
             baseURL: "https://openrouter.ai/api/v1",
             defaultHeaders: {
-              "HTTP-Referer": "https://anythingllm.com",
-              "X-Title": "AnythingLLM",
+              "HTTP-Referer": "https://github.com/janet-e4/anything-llm",
+              "X-Title": "Janet",
             },
           },
           apiKey: process.env.OPENROUTER_API_KEY ?? null,
