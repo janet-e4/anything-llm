@@ -14,9 +14,11 @@ import {
 import useTextSize from "@/hooks/useTextSize";
 import { useTranslation } from "react-i18next";
 import Appearance from "@/models/appearance";
-import usePromptInputStorage from "@/hooks/usePromptInputStorage";
+import usePromptInputStorage, {
+  useDraftTimestamp,
+} from "@/hooks/usePromptInputStorage";
 import ToolsMenu, { TOOLS_MENU_KEYBOARD_EVENT } from "./ToolsMenu";
-import { useSearchParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { useIsAgentSessionActive } from "@/utils/chat/agent";
 
 export const PROMPT_INPUT_ID = "primary-prompt-input";
@@ -59,11 +61,23 @@ export default function PromptInput({
   const { textSizeClass } = useTextSize();
   const [searchParams] = useSearchParams();
 
+  // Resolve the storage key for the current thread/workspace context.
+  // useParams() gives us router slugs; props are fallbacks for home-page usage.
+  const {
+    threadSlug: routeThreadSlug = null,
+    slug: routeWorkspaceSlug = null,
+  } = useParams();
+  const resolvedStorageKey =
+    (threadSlug ?? routeThreadSlug) ?? (workspaceSlug ?? routeWorkspaceSlug);
+
   // Synchronizes prompt input value with localStorage, scoped to the current thread.
   usePromptInputStorage({
     promptInput,
     setPromptInput,
   });
+
+  // Draft autosave timestamp indicator
+  const draftTimestamp = useDraftTimestamp(resolvedStorageKey);
 
   /*
    * @checklist-item
@@ -364,6 +378,11 @@ export default function PromptInput({
                   placeholder={t("chat_window.send_message")}
                 />
               </div>
+              {promptInput && draftTimestamp && (
+                <span className="absolute bottom-[60px] right-4 text-[10px] text-zinc-500 light:text-slate-400 pointer-events-none">
+                  Draft saved &middot; {draftTimestamp.relativeTime}
+                </span>
+              )}
               <div className="flex justify-between items-center pt-3.5 pb-3">
                 <div className="flex items-center gap-x-0.25">
                   <div className="flex items-center gap-x-1">
