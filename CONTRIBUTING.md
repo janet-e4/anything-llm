@@ -1,105 +1,162 @@
-# Contributing to AnythingLLM
+# Contributing to the E4 Studios fork of AnythingLLM
 
-AnythingLLM is an open-source project and we welcome contributions from the community.
+This document describes how to work on the fork without breaking the production deployment at https://zhealth.lvbs.com or accidentally leaking secrets to the public GitHub repo.
 
-## Reporting Issues
+If you are looking for the upstream contributing guide, see [Mintplex-Labs/anything-llm](https://github.com/Mintplex-Labs/anything-llm). The rules below are **in addition** to upstream conventions, not a replacement for them.
 
-If you encounter a bug or have a feature request, please open an issue on the
-[GitHub issue tracker](https://github.com/mintplex-labs/anything-llm).
+---
 
-## Picking an issue
+## Branch strategy
 
-We track issues on the GitHub issue tracker. If you are looking for something to
-work on, check the [good first issue](https://github.com/mintplex-labs/anything-llm/contribute) label. These issues are typically the best described and have the smallest scope. There may be issues that are not labeled as good first issue, but are still a good starting point.
+Three branches, each with a distinct role.
 
-If there's an issue you are interested in working on, please leave a comment on the issue. This will help us avoid duplicate work. Additionally, if you have questions about the issue, please ask them in the issue comments. We are happy to provide guidance on how to approach the issue.
-
-## Before you start
-
-Keep in mind that we are a small team and have limited resources. We will do our best to review and merge your PRs, but please be patient. Ultimately, **we become the maintainer** of your changes. It is our responsibility to make sure that the changes are working as expected and are of high quality as well as being compatible with the rest of the project both for existing users and for future users & features.
-
-Before you start working on an issue, please read the following so that you don't waste time on something that is not a good fit for the project or is more suitable for a personal fork. We would rather answer a comment on an issue than close a PR after you've spent time on it. Your time is valuable and we appreciate your time and effort to make AnythingLLM better.
-
-0. (most important) If you are making a PR that does not have a corresponding issue, **it will not be merged.** _The only exception to this is language translations._
-
-1. If you are modifying the permission system for a new role or something custom, you are likely better off forking the project and building your own version since this is a core part of the project and is only to be maintained by the AnythingLLM team.
-
-2. Integrations (LLM, Vector DB, etc.) are reviewed at our discretion. We will eventually get to them. Do not expect us to merge your integration PR instantly since there are often many moving parts and we want to make sure we get it right. We will get to it!
-
-3. It is our discretion to merge or not merge a PR. We value every contribution, but we also value the quality of the code and the user experience we envision for the project. It is a fine line to walk when running a project like this and please understand that merging or not merging a PR is not a reflection of the quality of the contribution and is not personal. We will do our best to provide feedback on the PR and help you make the changes necessary to get it merged.
-
-4. **Security** is always important. If you have a security concern, please do not open an issue. Instead, please open a CVE on our designated reporting platform [Huntr](https://huntr.com) or contact us at [team@mintplexlabs.com](mailto:team@mintplexlabs.com).
-
-## Configuring Git
-
-First, fork the repository on GitHub, then clone your fork:
-
-```bash
-git clone https://github.com/<username>/anything-llm.git
-cd anything-llm
+```
+master                              (mirrors upstream, never edited directly)
+  └─ feature/message-draft-autosave (upstream PR candidate, #5629)
+        └─ e4/ui-customizations    (E4-private, only branch deployed)
 ```
 
-Then add the main repository as a remote:
+- **`master`** — kept in sync with `upstream/master`. Do not commit here. Update with `git fetch upstream && git merge --ff-only upstream/master`.
+- **`feature/<name>`** — for any change we want to send upstream as a PR. Branch off `master`. Keep the diff narrow, provider-agnostic, and free of E4 references.
+- **`e4/ui-customizations`** — branch off the most recent feature branch (currently `feature/message-draft-autosave`). Everything that won't go upstream lives here: branding removal, telemetry hardcode, Z-Health agent flows, the display panel.
+
+### Never commit
+
+- `.env`, `.env.development`, `.env.local`
+- OpenClaw bearer tokens / API keys (`OPENCLAW_KEY`, `GENERIC_OPEN_AI_API_KEY`, etc.)
+- `JWT_SECRET` values or generated session keys
+- `storage/comkey/`, `storage/push-notifications/`
+- Anything under `~/.openclaw/anythingllm/.env` or `~/.cloudflared/`
+- SQLite snapshots (`anythingllm.db`, `*.sqlite`, `*.sqlite-journal`)
+
+`.gitignore` covers the standard cases, but new files that match these patterns should be reviewed before `git add`. Prefer staging specific paths (`git add path/to/file`) over `git add .`.
+
+---
+
+## Local development workflow
+
+The fork's deployment model is "bind-mount the built frontend into the container", so there is **no Vite dev server** in the loop. The workflow is:
 
 ```bash
-git remote add upstream https://github.com/mintplex-labs/anything-llm.git
+cd ~/Projects/anything-llm/frontend
+npm install            # only needed when package.json changes
+npm run build
+```
+
+Then either:
+
+- Hard-refresh the browser at http://localhost:3001 (Cmd+Shift+R), **or**
+- `cd ~/.openclaw/anythingllm && docker compose restart anythingllm` to be safe.
+
+Always test in a fresh browser profile or Incognito window after a frontend change. Service workers and the cached module graph can otherwise mask real bugs.
+
+### Backend changes
+
+The container runs the published Mintplex image with two patched files bind-mounted on top:
+
+- `~/.openclaw/anythingllm/server-index.js` → `/app/server/index.js` (Cache-Control, telemetry hardcode)
+- `~/.openclaw/anythingllm/MetaGenerator.js` → `/app/server/utils/boot/MetaGenerator.js` (no `?v=` query stamp)
+- `~/.openclaw/anythingllm/qdrant-provider.js` → `/app/server/utils/vectorDbProviders/qdrant/index.js`
+
+Backend changes that need to ship to production should be:
+1. Made in the fork under `server/` so the diff is reviewable in git.
+2. Copied into the corresponding `~/.openclaw/anythingllm/*.js` bind-mount target.
+3. Followed by `docker compose restart anythingllm`.
+
+---
+
+## What goes upstream vs. stays in the fork
+
+| Type of change | Destination |
+|---|---|
+| Bug fix in upstream behavior | `feature/<name>` -> upstream PR |
+| Provider-agnostic feature (works for any LLM backend) | `feature/<name>` -> upstream PR |
+| Accessibility, i18n, perf improvement | `feature/<name>` -> upstream PR |
+| Branding removal / Mintplex link removal | `e4/ui-customizations` only |
+| Telemetry hardcode | `e4/ui-customizations` only |
+| Z-Health agent flows / prompts | `e4/ui-customizations` + `~/.openclaw/anythingllm/storage/plugins/agent-flows/` |
+| Display settings panel (opinionated, not upstream-friendly) | `e4/ui-customizations` only |
+| Cache-Control header patch | `e4/ui-customizations` only (until proven upstream-acceptable) |
+
+If you're unsure, ask: "Would Mintplex want this for every user?" If yes, make a feature branch. If it's only useful to E4 / Z-Health, put it on `e4/ui-customizations`.
+
+---
+
+## Avoiding the dual-React trap
+
+**Never add `?v=<stamp>` (or any query string) to `/index.js`** in the served HTML.
+
+ES modules treat `/index.js` and `/index.js?v=123` as **two distinct modules**. If a browser ever loads both (e.g. one from disk cache + one freshly stamped), you get two copies of React in memory and any hook call throws **Minified React error #321: Invalid hook call**. We hit this in production and it took several hours to diagnose.
+
+**Correct approach** (already in place):
+- `server/index.js` static middleware sets `Cache-Control: no-cache` for `/index.js` and `/index.css`, and `Cache-Control: public, max-age=31536000, immutable` for hashed assets like `/index-a5168934.js`.
+- `MetaGenerator.js` emits `<script type="module" src="/index.js">` with no query string.
+
+If you ever feel the urge to bust the cache with a query stamp, stop and check whether the Cache-Control headers are actually being sent by inspecting a response in DevTools. They are the cache-busting mechanism in this fork.
+
+---
+
+## Rebasing on upstream
+
+When upstream lands changes we want, rebase from the bottom of the stack up:
+
+```bash
+cd ~/Projects/anything-llm
 git fetch upstream
+
+# 1. Fast-forward master
+git checkout master
+git merge --ff-only upstream/master
+
+# 2. Rebase the feature branch onto new master
+git checkout feature/message-draft-autosave
+git rebase upstream/master
+# Resolve conflicts. Expected hotspots:
+#   frontend/src/hooks/usePromptInputStorage.js
+#   frontend/src/components/WorkspaceChat/ChatContainer/index.jsx
+
+# 3. Rebase the E4 branch onto the new feature branch
+git checkout e4/ui-customizations
+git rebase feature/message-draft-autosave
+# Expected hotspots: anything Mintplex touched in
+#   frontend/src/components/Sidebar
+#   frontend/src/components/SettingsSidebar
+#   frontend/src/pages/GeneralSettings
 ```
 
-## Setting up your development environment
-
-In the root of the repository, run:
+After rebasing:
 
 ```bash
-yarn setup
+cd ~/Projects/anything-llm/frontend && npm run build
+cd ~/.openclaw/anythingllm && docker compose restart anythingllm
 ```
 
-This will install the dependencies, set up the proper and expected ENV files for the project, and run the prisma setup script.
-Next, run:
+Verify in browser: log in, send a test message, check the display settings panel renders, confirm no Mintplex links have crept back in.
+
+Force-push is required after a rebase (the branches are private to E4). Use `git push --force-with-lease` to avoid clobbering someone else's work:
 
 ```bash
-yarn dev:all
+git push --force-with-lease origin feature/message-draft-autosave
+git push --force-with-lease origin e4/ui-customizations
 ```
-This will start the server, frontend, and collector in development mode. Changes to the code will be hot reloaded.
 
-## Best practices for pull requests
+---
 
-For the best chance of having your pull request accepted, please follow these guidelines:
+## Commit message style
 
-1. Unit test all bug fixes and new features. Your code will not be merged if it
-   doesn't have tests.
-1. If you change the public API, update the documentation in the `anythingllm-docs` repository.
-1. Aim to minimize the number of changes in each pull request. Keep to solving
-   one problem at a time, when possible.
-1. Before marking a pull request ready-for-review, do a self review of your code.
-   Is it clear why you are making the changes? Are the changes easy to understand?
-1. Use [conventional commit messages](https://www.conventionalcommits.org/en/) as pull request titles. Examples:
-    * New feature: `feat: adding foo API`
-    * Bug fix: `fix: issue with foo API`
-    * Documentation change: `docs: adding foo API documentation`
-1. If your pull request is a work in progress, leave the pull request as a draft.
-   We will assume the pull request is ready for review when it is opened.
-1. When writing tests, test the error cases. Make sure they have understandable
-   error messages.
+Follow Conventional Commits, with a scope that identifies where the change lives:
 
-## Project structure
+- `feat(PromptInput): ...` — upstream-bound feature work
+- `fix(ChatContainer): ...` — upstream-bound bug fix
+- `docs(e4): ...` — fork-only documentation
+- `chore(e4): ...` — fork-only branding, config, or build tweaks
 
-The core library is written in Node.js. There are additional sub-repositories for the embed widget and browser extension. These are not part of the core AnythingLLM project, but are maintained by the AnythingLLM team.
+E4-only commits should generally use the `(e4)` scope so they're easy to identify when reviewing what would land upstream vs. what stays private.
 
-* `server`: Node.js server source code
-* `frontend`: React frontend source code
-* `collector`: Python collector source code
+---
 
-## Release process
+## Reporting issues
 
-Changes to the core AnythingLLM project are released through the `master` branch. When a PR is merged into `master`, a new version of the package is published to Docker and GitHub Container Registry under the `latest` tag.
-
-When a new version is released, the following steps are taken a new image is built and pushed to Docker Hub and GitHub Container Registry under the associated version tag. Version tags are of the format `v<major>.<minor>.<patch>` and are pinned code, while `latest` is the latest version of the code at any point in time.
-
-### Desktop propagation
-
-Changes to the desktop app are downstream of the core AnythingLLM project. Releases of the desktop app are published at the same time as the core AnythingLLM project. Code from the core AnythingLLM project is copied into the desktop app into an Electron wrapper. The Electron wrapper that wraps around the core AnythingLLM project is **not** part of the core AnythingLLM project, but is maintained by the AnythingLLM team.
-
-## License
-
-By contributing to AnythingLLM (this repository), you agree to license your contributions under the MIT license.
+- Bugs in upstream behavior: open an issue at https://github.com/Mintplex-Labs/anything-llm/issues
+- Bugs in E4-specific behavior: email janet@e4lv.com (do not open public issues that reference Z-Health internals)
+- Security issues: see [SECURITY.md](./SECURITY.md)
