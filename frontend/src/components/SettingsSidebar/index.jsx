@@ -13,7 +13,6 @@ import {
   Plugs,
 } from "@phosphor-icons/react";
 import AgentIcon from "@/media/animations/agent-static.png";
-import CommunityHubIcon from "@/media/illustrations/community-hub.png";
 import useUser from "@/hooks/useUser";
 import { isMobile } from "react-device-detect";
 import Footer from "../Footer";
@@ -187,21 +186,20 @@ export default function SettingsSidebar() {
 }
 
 function SupportEmail() {
-  const [supportEmail, setSupportEmail] = useState(paths.mailToMintplex());
+  const [supportEmail, setSupportEmail] = useState(null);
   const { t } = useTranslation();
 
   useEffect(() => {
     const fetchSupportEmail = async () => {
       const supportEmail = await System.fetchSupportEmail();
       setSupportEmail(
-        supportEmail?.email
-          ? `mailto:${supportEmail.email}`
-          : paths.mailToMintplex()
+        supportEmail?.email ? `mailto:${supportEmail.email}` : null
       );
     };
     fetchSupportEmail();
   }, []);
 
+  if (!supportEmail) return null;
   return (
     <Link
       to={supportEmail}
@@ -307,37 +305,6 @@ const SidebarOptions = ({ user = null, t }) => (
           user={user}
           flex={true}
           roles={["admin"]}
-        />
-        <Option
-          btnText={t("settings.community-hub.title")}
-          icon={
-            <img
-              src={CommunityHubIcon}
-              alt="Community Hub"
-              className="h-5 w-5 flex-shrink-0 light:invert"
-            />
-          }
-          user={user}
-          childOptions={[
-            {
-              btnText: t("settings.community-hub.trending"),
-              href: paths.communityHub.trending(),
-              flex: true,
-              roles: ["admin"],
-            },
-            {
-              btnText: t("settings.community-hub.your-account"),
-              href: paths.communityHub.authentication(),
-              flex: true,
-              roles: ["admin"],
-            },
-            {
-              btnText: t("settings.community-hub.import-item"),
-              href: paths.communityHub.importItem(),
-              flex: true,
-              roles: ["admin"],
-            },
-          ]}
         />
         <Option
           btnText={t("settings.customization")}
@@ -504,13 +471,8 @@ function AppVersion() {
   const { version, isLoading } = useAppVersion();
   if (isLoading) return null;
   return (
-    <Link
-      to={`https://github.com/Mintplex-Labs/anything-llm/releases/tag/v${version}`}
-      target="_blank"
-      rel="noreferrer"
-      className="text-theme-text-secondary light:opacity-80 opacity-50 text-xs mx-3"
-    >
+    <span className="text-theme-text-secondary light:opacity-80 opacity-50 text-xs mx-3">
       v{version}
-    </Link>
+    </span>
   );
 }
