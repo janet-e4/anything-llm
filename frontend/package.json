@@ -1,5 +1,15 @@
 {
-  "name": "anything-llm-frontend",
+  "name": "janet-frontend",
+  "description": "Janet — private AI assistant by E4 Studios (frontend)",
+  "author": "Timothy Carambat (Mintplex Labs) — E4 Studios fork",
+  "homepage": "https://github.com/janet-e4/anything-llm",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/janet-e4/anything-llm.git"
+  },
+  "bugs": {
+    "email": "janet@e4lv.com"
+  },
   "private": false,
   "license": "MIT",
   "type": "module",

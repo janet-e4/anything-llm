@@ -1,9 +1,17 @@
 {
-  "name": "anything-llm-server",
+  "name": "janet-server",
   "version": "1.12.1",
-  "description": "Server endpoints to process or create content for chatting",
+  "description": "Janet — private AI assistant by E4 Studios (server)",
   "main": "index.js",
-  "author": "Timothy Carambat (Mintplex Labs)",
+  "author": "Timothy Carambat (Mintplex Labs) — E4 Studios fork",
+  "homepage": "https://github.com/janet-e4/anything-llm",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/janet-e4/anything-llm.git"
+  },
+  "bugs": {
+    "email": "janet@e4lv.com"
+  },
   "license": "MIT",
   "private": false,
   "engines": {
