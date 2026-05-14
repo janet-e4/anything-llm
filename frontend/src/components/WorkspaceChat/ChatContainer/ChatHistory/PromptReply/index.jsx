@@ -56,7 +56,7 @@ const PromptReply = ({ uuid, reply, pending, error, sources = [] }) => {
 function RenderAssistantChatContent({ message, messageId }) {
   const contentRef = useRef("");
   const thoughtChainRef = useRef(null);
-  const [displaySettings, setDisplaySettings] = useState(readDisplaySettings);
+  const [displaySettings, setDisplaySettings] = useState(() => readDisplaySettings());
 
   useEffect(() => {
     function onSettingsChange(e) {
