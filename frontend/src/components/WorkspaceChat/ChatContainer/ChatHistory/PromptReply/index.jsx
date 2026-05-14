@@ -1,8 +1,9 @@
 /* eslint-disable react-hooks/refs */
-import { memo, useRef, useEffect } from "react";
+import { memo, useRef, useEffect, useState } from "react";
 import { Warning } from "@phosphor-icons/react";
 import renderMarkdown from "@/utils/chat/markdown";
 import DOMPurify from "@/utils/chat/purify";
+import { readDisplaySettings } from "@/hooks/useDisplaySettings";
 import Citations from "../Citation";
 import {
   THOUGHT_REGEX_CLOSE,
@@ -55,6 +56,15 @@ const PromptReply = ({ uuid, reply, pending, error, sources = [] }) => {
 function RenderAssistantChatContent({ message, messageId }) {
   const contentRef = useRef("");
   const thoughtChainRef = useRef(null);
+  const [displaySettings, setDisplaySettings] = useState(readDisplaySettings);
+
+  useEffect(() => {
+    function onSettingsChange(e) {
+      setDisplaySettings(e.detail);
+    }
+    window.addEventListener("e4DisplaySettingsChange", onSettingsChange);
+    return () => window.removeEventListener("e4DisplaySettingsChange", onSettingsChange);
+  }, []);
 
   useEffect(() => {
     const thinking =
@@ -98,7 +108,14 @@ function RenderAssistantChatContent({ message, messageId }) {
       <span
         className="break-words"
         dangerouslySetInnerHTML={{
-          __html: DOMPurify.sanitize(renderMarkdown(contentRef.current)),
+          __html: displaySettings.markdownEnabled
+            ? DOMPurify.sanitize(
+                renderMarkdown(contentRef.current),
+                displaySettings.htmlEnabled ? {} : { FORBID_TAGS: ["script","iframe","object","embed","form"] }
+              )
+            : displaySettings.htmlEnabled
+              ? DOMPurify.sanitize(contentRef.current)
+              : contentRef.current.replace(/</g, "&lt;").replace(/>/g, "&gt;"),
         }}
       />
     </div>

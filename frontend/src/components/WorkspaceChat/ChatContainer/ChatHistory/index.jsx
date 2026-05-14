@@ -21,6 +21,7 @@ import { useParams } from "react-router-dom";
 import paths from "@/utils/paths";
 import Appearance from "@/models/appearance";
 import useTextSize from "@/hooks/useTextSize";
+import useDisplaySettings from "@/hooks/useDisplaySettings";
 import useChatHistoryScrollHandle from "@/hooks/useChatHistoryScrollHandle";
 import { ThoughtExpansionProvider } from "./ThoughtContainer";
 import { MessageActionsProvider } from "./MessageActionsContext";
@@ -45,6 +46,7 @@ export default forwardRef(function (
   const isStreaming = history[history.length - 1]?.animate;
   const { showScrollbar } = Appearance.getSettings();
   const { textSizeClass } = useTextSize();
+  const { settings: displaySettings } = useDisplaySettings();
 
   useEffect(() => {
     if (!isUserScrolling && (isAtBottom || isStreaming)) {
@@ -214,6 +216,7 @@ export default forwardRef(function (
       <ThoughtExpansionProvider>
         <div
           className={`markdown text-white/80 light:text-theme-text-primary font-light ${textSizeClass} h-full md:h-[83%] pb-[100px] pt-6 md:pt-0 md:pb-20 md:mx-0 overflow-y-scroll flex flex-col items-center justify-start ${showScrollbar ? "show-scrollbar" : "no-scroll"}`}
+          style={{ fontFamily: "var(--e4-chat-font, inherit)" }}
           id="chat-history"
           ref={chatHistoryRef}
           onScroll={handleScroll}
