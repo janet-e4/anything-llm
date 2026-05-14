@@ -112,10 +112,19 @@ if (process.env.NODE_ENV !== "development") {
   app.use(
     express.static(path.resolve(__dirname, "public"), {
       extensions: ["js"],
-      setHeaders: (res) => {
+      setHeaders: (res, filePath) => {
         // Disable I-framing of entire site UI
         res.removeHeader("X-Powered-By");
         res.setHeader("X-Frame-Options", "DENY");
+        // Hashed asset files (e.g. index-a5168934.js) are safe to cache forever.
+        // Unhashed entry points (index.js, index.css) must revalidate on every load
+        // so stale cached bundles don't serve old code after a deploy.
+        const isHashedAsset = /assets\/[^/]+-[a-f0-9]{8}\.(js|css)$/.test(filePath);
+        if (isHashedAsset) {
+          res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        } else {
+          res.setHeader("Cache-Control", "no-cache, must-revalidate");
+        }
       },
     })
   );
