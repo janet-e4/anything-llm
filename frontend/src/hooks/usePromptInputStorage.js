@@ -1,36 +1,29 @@
 import { USER_PROMPT_INPUT_MAP } from "@/utils/constants";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import debounce from "lodash.debounce";
 import { safeJsonParse } from "@/utils/request";
+import Workspace from "@/models/workspace";
 
 /**
- * Synchronizes prompt input value with localStorage, scoped to the current thread.
+ * Synchronizes prompt input value with the server (DB-backed) for thread-scoped
+ * drafts, falling back to localStorage when:
+ * - We're not in a thread context (no threadSlug yet — workspace default chat).
+ * - The API call fails (offline / server down).
  *
- * Persists unsent prompt text across page refreshes and navigation. Each thread/workspace maintains
- * its own draft state independently. Storage key is determined by thread slug (if in a thread) or
- * workspace slug (if in default chat).
+ * Per-user, per-thread drafts now live on the server so that they:
+ * - Survive across browsers / devices.
+ * - Become visible to other users with whom the thread is shared (presence).
  *
- * Storage format (stored under USER_PROMPT_INPUT_MAP key):
- * ```json
- * {
- *   "thread-slug": { "text": "user's draft message...", "savedAt": 1234567890 },
- *   "workspace-slug": { "text": "another draft message...", "savedAt": 1234567890 }
- * }
- * ```
- * Backwards-compatible: entries may still be plain strings from older versions.
- *
- * @param {Object} props
- * @param {string} props.promptInput - Current prompt input value to sync
- * @param {Function} props.setPromptInput - State setter function for prompt input
- * @returns {void}
+ * A one-time migration pushes any pre-existing localStorage drafts into the
+ * DB on first mount per browser, then sets `e4_drafts_migrated=1`.
  */
+
+const MIGRATION_FLAG = "e4_drafts_migrated";
 
 /**
  * Reads the text portion of a stored draft entry, handling both the legacy
- * plain-string format and the new `{text, savedAt}` object format.
- * @param {string|{text:string,savedAt:number|null}|undefined} entry
- * @returns {{text:string, savedAt:number|null}}
+ * plain-string format and the `{text, savedAt}` object format.
  */
 function normalizeDraftEntry(entry) {
   if (!entry) return { text: "", savedAt: null };
@@ -38,78 +31,135 @@ function normalizeDraftEntry(entry) {
   return { text: entry.text ?? "", savedAt: entry.savedAt ?? null };
 }
 
+function readLocalMap() {
+  return safeJsonParse(localStorage.getItem(USER_PROMPT_INPUT_MAP), {}) || {};
+}
+
+function writeLocalEntry(key, text, savedAt) {
+  if (!key) return;
+  const map = readLocalMap();
+  map[key] = { text, savedAt };
+  localStorage.setItem(USER_PROMPT_INPUT_MAP, JSON.stringify(map));
+}
+
 /**
  * Immediately clears the stored draft for a given thread/workspace key.
- * Used before state updates that may remount PromptInput to prevent
- * stale text from being restored.
- * @param {string} storageKey - thread slug or workspace slug
+ * Clears localStorage synchronously and fires-and-forgets nothing here because
+ * we don't have the workspace slug context. The hook's mount-cleanup and the
+ * debounced writer (which now writes an empty string) handle the API side.
  */
 export function clearPromptInputDraft(storageKey) {
   try {
-    const map = safeJsonParse(localStorage.getItem(USER_PROMPT_INPUT_MAP), {});
-    map[storageKey] = { text: "", savedAt: null };
-    localStorage.setItem(USER_PROMPT_INPUT_MAP, JSON.stringify(map));
+    writeLocalEntry(storageKey, "", null);
+    window.dispatchEvent(new CustomEvent("e4DraftSync"));
   } catch {}
 }
 
 /**
- * Immediately saves a draft value for a given thread/workspace key.
- * Used to restore a user's message after a provider error so they don't
- * lose their typed text when the LLM backend returns an abort/error response.
- * @param {string} storageKey - thread slug or workspace slug
- * @param {string} value - the message text to save as a draft
+ * Restore-on-error path. Saves to localStorage immediately; the hook's
+ * debounced writer will push to the API on the next promptInput change.
  */
 export function savePromptInputDraft(storageKey, value) {
   try {
-    const map = safeJsonParse(localStorage.getItem(USER_PROMPT_INPUT_MAP), {});
-    map[storageKey] = { text: value, savedAt: Date.now() };
-    localStorage.setItem(USER_PROMPT_INPUT_MAP, JSON.stringify(map));
+    writeLocalEntry(storageKey, value, Date.now());
+    window.dispatchEvent(new CustomEvent("e4DraftSync"));
   } catch {}
 }
 
+/**
+ * One-time migration: push any existing localStorage draft for the current
+ * thread up to the DB and remove it locally. Idempotent via MIGRATION_FLAG.
+ */
+async function migrateLocalDraftsToDb(workspaceSlug, threadSlug) {
+  if (localStorage.getItem(MIGRATION_FLAG)) return;
+  if (!workspaceSlug || !threadSlug) return;
+  const map = readLocalMap();
+  const { text } = normalizeDraftEntry(map[threadSlug]);
+  if (text) {
+    try {
+      await Workspace.threads.saveDraft(workspaceSlug, threadSlug, text);
+      delete map[threadSlug];
+      localStorage.setItem(USER_PROMPT_INPUT_MAP, JSON.stringify(map));
+    } catch {}
+  }
+  localStorage.setItem(MIGRATION_FLAG, "1");
+}
+
+/**
+ * @param {Object} props
+ * @param {string} props.promptInput - Current prompt input value to sync
+ * @param {Function} props.setPromptInput - State setter function for prompt input
+ * @returns {void}
+ */
 export default function usePromptInputStorage({ promptInput, setPromptInput }) {
-  const { threadSlug = null, slug: workspaceSlug } = useParams();
+  const { threadSlug = null, slug: workspaceSlug = null } = useParams();
+  const storageKey = threadSlug ?? workspaceSlug;
+  const initialLoadDone = useRef(false);
+
+  // Mount: load from API (preferred) or fall back to localStorage.
   useEffect(() => {
-    const serializedPromptInputMap =
-      localStorage.getItem(USER_PROMPT_INPUT_MAP) || "{}";
+    if (initialLoadDone.current) return;
+    initialLoadDone.current = true;
 
-    const promptInputMap = safeJsonParse(serializedPromptInputMap, {});
+    let cancelled = false;
+    async function loadInitial() {
+      // Migrate first so we don't overwrite the just-pushed value with localStorage.
+      await migrateLocalDraftsToDb(workspaceSlug, threadSlug);
 
-    const rawEntry = promptInputMap[threadSlug ?? workspaceSlug];
-    const { text } = normalizeDraftEntry(rawEntry);
-    if (text) {
-      setPromptInput(text);
+      // API path: only when we have a thread context.
+      if (workspaceSlug && threadSlug) {
+        const { drafts, myUserId } = await Workspace.threads.getDrafts(
+          workspaceSlug,
+          threadSlug
+        );
+        if (cancelled) return;
+        const own = drafts.find((d) => d.user_id === myUserId);
+        if (own?.content) {
+          setPromptInput(own.content);
+          writeLocalEntry(
+            storageKey,
+            own.content,
+            new Date(own.updatedAt).getTime()
+          );
+          window.dispatchEvent(new CustomEvent("e4DraftSync"));
+          return;
+        }
+      }
+
+      // Fall back to localStorage.
+      const map = readLocalMap();
+      const { text } = normalizeDraftEntry(map[storageKey]);
+      if (text) setPromptInput(text);
     }
+    loadInitial();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const debouncedWriteToStorage = useMemo(
+  // Debounced write on every promptInput change: API + localStorage fallback.
+  const debouncedWrite = useMemo(
     () =>
-      debounce((value, slug) => {
-        const serializedPromptInputMap =
-          localStorage.getItem(USER_PROMPT_INPUT_MAP) || "{}";
-        const promptInputMap = safeJsonParse(serializedPromptInputMap, {});
-        promptInputMap[slug] = { text: value, savedAt: Date.now() };
-        localStorage.setItem(
-          USER_PROMPT_INPUT_MAP,
-          JSON.stringify(promptInputMap)
-        );
+      debounce(async (value) => {
+        if (!storageKey) return;
+        writeLocalEntry(storageKey, value, Date.now());
+        window.dispatchEvent(new CustomEvent("e4DraftSync"));
+        if (workspaceSlug && threadSlug) {
+          await Workspace.threads.saveDraft(workspaceSlug, threadSlug, value);
+        }
       }, 500),
-    []
+    [storageKey, workspaceSlug, threadSlug]
   );
 
   useEffect(() => {
-    debouncedWriteToStorage(promptInput, threadSlug ?? workspaceSlug);
-
-    return () => {
-      debouncedWriteToStorage.cancel();
-    };
-  }, [promptInput, threadSlug, workspaceSlug, debouncedWriteToStorage]);
+    debouncedWrite(promptInput);
+    return () => debouncedWrite.cancel();
+  }, [promptInput, debouncedWrite]);
 }
 
 /**
  * Formats a timestamp into a human-readable relative time string.
- * @param {number|null} savedAt - Unix timestamp in milliseconds
- * @returns {string} e.g. "just now", "1 min ago", "5 min ago"
  */
 function formatRelativeTime(savedAt) {
   if (!savedAt) return null;
@@ -125,68 +175,41 @@ function formatRelativeTime(savedAt) {
  * thread/workspace draft. Updates every 30 seconds. Returns null when the
  * draft is empty or has never been saved.
  *
+ * Listens to:
+ * - `e4DraftSync` (in-tab custom event fired when the hook writes a draft)
+ * - `storage` (cross-tab updates)
+ *
  * @param {string} storageKey - thread slug or workspace slug
  * @returns {{savedAt: number, relativeTime: string}|null}
  */
 export function useDraftTimestamp(storageKey) {
   const [result, setResult] = useState(() => {
-    try {
-      const map = safeJsonParse(
-        localStorage.getItem(USER_PROMPT_INPUT_MAP),
-        {}
-      );
-      const { text, savedAt } = normalizeDraftEntry(map[storageKey]);
-      if (!text || !savedAt) return null;
-      return { savedAt, relativeTime: formatRelativeTime(savedAt) };
-    } catch {
-      return null;
-    }
+    const map = readLocalMap();
+    const { text, savedAt } = normalizeDraftEntry(map[storageKey]);
+    if (!text || !savedAt) return null;
+    return { savedAt, relativeTime: formatRelativeTime(savedAt) };
   });
 
-  // Re-read from storage whenever the key changes (e.g. thread switch)
   useEffect(() => {
     function read() {
-      try {
-        const map = safeJsonParse(
-          localStorage.getItem(USER_PROMPT_INPUT_MAP),
-          {}
-        );
-        const { text, savedAt } = normalizeDraftEntry(map[storageKey]);
-        if (!text || !savedAt) {
-          setResult(null);
-          return;
-        }
-        setResult({ savedAt, relativeTime: formatRelativeTime(savedAt) });
-      } catch {
+      const map = readLocalMap();
+      const { text, savedAt } = normalizeDraftEntry(map[storageKey]);
+      if (!text || !savedAt) {
         setResult(null);
+        return;
       }
+      setResult({ savedAt, relativeTime: formatRelativeTime(savedAt) });
     }
-
     read();
-
-    // Refresh the relative-time label every 30 seconds
     const interval = setInterval(read, 30000);
-    return () => clearInterval(interval);
-  }, [storageKey]);
-
-  // Re-read when localStorage changes (e.g. debounced write lands)
-  useEffect(() => {
-    function onStorage(e) {
-      if (e.key !== USER_PROMPT_INPUT_MAP) return;
-      try {
-        const map = safeJsonParse(e.newValue, {});
-        const { text, savedAt } = normalizeDraftEntry(map[storageKey]);
-        if (!text || !savedAt) {
-          setResult(null);
-          return;
-        }
-        setResult({ savedAt, relativeTime: formatRelativeTime(savedAt) });
-      } catch {
-        setResult(null);
-      }
-    }
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
+    const handler = () => read();
+    window.addEventListener("e4DraftSync", handler);
+    window.addEventListener("storage", handler);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("e4DraftSync", handler);
+      window.removeEventListener("storage", handler);
+    };
   }, [storageKey]);
 
   return result;

@@ -208,6 +208,58 @@ const WorkspaceThread = {
         return false;
       });
   },
+  saveDraft: async function (workspaceSlug, threadSlug, content) {
+    return await fetch(
+      `${API_BASE}/workspace/${workspaceSlug}/thread/${threadSlug}/draft`,
+      {
+        method: "PUT",
+        headers: baseHeaders(),
+        body: JSON.stringify({ content }),
+      }
+    )
+      .then((res) => res.json())
+      .then((res) => res.draft)
+      .catch(() => null);
+  },
+  getDrafts: async function (workspaceSlug, threadSlug) {
+    return await fetch(
+      `${API_BASE}/workspace/${workspaceSlug}/thread/${threadSlug}/drafts`,
+      { headers: baseHeaders() }
+    )
+      .then((res) => res.json())
+      .then((res) => ({ drafts: res.drafts || [], myUserId: res.myUserId }))
+      .catch(() => ({ drafts: [], myUserId: null }));
+  },
+  clearDraft: async function (workspaceSlug, threadSlug) {
+    return await fetch(
+      `${API_BASE}/workspace/${workspaceSlug}/thread/${threadSlug}/draft`,
+      { method: "DELETE", headers: baseHeaders() }
+    )
+      .then((res) => res.ok)
+      .catch(() => false);
+  },
+  setShares: async function (workspaceSlug, threadSlug, shares) {
+    return await fetch(
+      `${API_BASE}/workspace/${workspaceSlug}/thread/${threadSlug}/shares`,
+      {
+        method: "PUT",
+        headers: baseHeaders(),
+        body: JSON.stringify({ shares }),
+      }
+    )
+      .then((res) => res.json())
+      .then((res) => res.shares || [])
+      .catch(() => null);
+  },
+  getShares: async function (workspaceSlug, threadSlug) {
+    return await fetch(
+      `${API_BASE}/workspace/${workspaceSlug}/thread/${threadSlug}/shares`,
+      { headers: baseHeaders() }
+    )
+      .then((res) => res.json())
+      .then((res) => res.shares || [])
+      .catch(() => []);
+  },
 };
 
 export default WorkspaceThread;

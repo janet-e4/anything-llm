@@ -17,6 +17,7 @@ import Appearance from "@/models/appearance";
 import usePromptInputStorage, {
   useDraftTimestamp,
 } from "@/hooks/usePromptInputStorage";
+import useThreadPresence from "@/hooks/useThreadPresence";
 import ToolsMenu, { TOOLS_MENU_KEYBOARD_EVENT } from "./ToolsMenu";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useIsAgentSessionActive } from "@/utils/chat/agent";
@@ -78,6 +79,13 @@ export default function PromptInput({
 
   // Draft autosave timestamp indicator
   const draftTimestamp = useDraftTimestamp(resolvedStorageKey);
+
+  // Presence: other users currently drafting in this shared thread
+  const presence = useThreadPresence(
+    workspaceSlug ?? routeWorkspaceSlug,
+    threadSlug ?? routeThreadSlug,
+    !!(threadSlug ?? routeThreadSlug)
+  );
 
   /*
    * @checklist-item
@@ -381,6 +389,15 @@ export default function PromptInput({
               {promptInput && draftTimestamp && (
                 <span className="absolute bottom-[60px] right-4 text-[10px] text-zinc-500 light:text-slate-400 pointer-events-none">
                   Draft saved &middot; {draftTimestamp.relativeTime}
+                </span>
+              )}
+              {presence.length > 0 && (
+                <span className="absolute bottom-[42px] left-4 text-[10px] text-blue-400 pointer-events-none">
+                  {presence
+                    .map((p) => p.user?.username)
+                    .filter(Boolean)
+                    .join(" and ")}{" "}
+                  {presence.length === 1 ? "is" : "are"} drafting…
                 </span>
               )}
               <div className="flex justify-between items-center pt-3.5 pb-3">

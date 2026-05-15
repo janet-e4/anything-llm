@@ -599,6 +599,15 @@ const Workspace = {
       });
   },
 
+  getShareableUsers: async function (slug) {
+    return await fetch(`${API_BASE}/workspace/${slug}/shareable-users`, {
+      headers: baseHeaders(),
+    })
+      .then((res) => res.json())
+      .then((res) => res.users || [])
+      .catch(() => []);
+  },
+
   threads: WorkspaceThread,
 };
 

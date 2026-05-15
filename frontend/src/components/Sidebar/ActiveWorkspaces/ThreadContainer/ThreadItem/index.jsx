@@ -6,11 +6,14 @@ import {
   ArrowCounterClockwise,
   DotsThree,
   PencilSimple,
+  Share,
   Trash,
+  UsersThree,
   X,
 } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import ShareDialog from "@/components/WorkspaceChat/ShareDialog";
 
 const THREAD_CALLOUT_DETAIL_WIDTH = 26;
 export default function ThreadItem({
@@ -28,6 +31,7 @@ export default function ThreadItem({
   const workspaceSlug = workspace?.slug ?? urlSlug;
   const optionsContainer = useRef(null);
   const [showOptions, setShowOptions] = useState(false);
+  const [showShareDialog, setShowShareDialog] = useState(false);
   const linkTo = thread.virtual
     ? "/"
     : !thread.slug
@@ -133,6 +137,24 @@ export default function ThreadItem({
               </button>
             ) : (
               <div className="flex items-center w-fit md:invisible md:group-hover/thread:visible md:group-focus-within/thread:visible gap-x-1">
+                {thread.isOwner && (
+                  <button
+                    type="button"
+                    className="border-none hover:bg-zinc-700 light:hover:bg-slate-200 p-1 rounded"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setShowShareDialog(true);
+                    }}
+                    title="Share thread"
+                    aria-label="Share thread"
+                  >
+                    <Share
+                      size={14}
+                      className="text-zinc-400 hover:text-white"
+                    />
+                  </button>
+                )}
                 <button
                   type="button"
                   className="border-none"
@@ -145,6 +167,14 @@ export default function ThreadItem({
                   />
                 </button>
               </div>
+            )}
+            {thread.isSharedWithMe && (
+              <span
+                title={`Shared by ${thread.sharedBy || "another user"}`}
+                className="ml-1 inline-flex items-center"
+              >
+                <UsersThree size={14} className="text-blue-400" />
+              </span>
             )}
             {showOptions && (
               <OptionsMenu
@@ -159,6 +189,14 @@ export default function ThreadItem({
           </div>
         )}
       </div>
+      {showShareDialog && (
+        <ShareDialog
+          workspaceSlug={workspaceSlug}
+          threadSlug={thread.slug}
+          threadName={thread.name}
+          onClose={() => setShowShareDialog(false)}
+        />
+      )}
     </div>
   );
 }
