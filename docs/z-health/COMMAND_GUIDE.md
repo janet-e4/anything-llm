@@ -76,6 +76,16 @@ Baked into the system prompt and every command:
 
 ---
 
-## A known gap: the hive mind
+## The Z-Health corpus (the "hive mind") — wired in
 
-Dr. Cobb's June 15 feedback identified the real bottleneck: the model writes with authority when it has Z-Health-specific source material, and pads with motivational framing when it does not. The 673 Z-Health transcripts from `/Volumes/Public/ZHealth` (Phase H) are the missing piece. Until they are wired into the workspace's vector knowledge base, the commands above produce the right *shape* and *voice*, but the *substance* still depends on the model's general knowledge plus whatever is embedded in the workspace. Embedding that source library is the highest-leverage next step.
+Dr. Cobb's June 15 feedback identified the real bottleneck: the model writes with authority when it has Z-Health-specific source material, and pads with motivational framing when it does not.
+
+That corpus is now live. The Z-Health knowledge base — **41,041 vectors** of zhealtheducation.com blog posts, podcast episode transcripts, and video transcripts (with speaker/timestamp metadata) — is loaded into the `zhealth_research` Qdrant collection that the workspace's native RAG queries on **every message**.
+
+This means you do not need to "ask for" the source material or invoke an agent. Every chat and every `/zh-*` command in the Z-Health workspace automatically retrieves the most relevant transcript chunks and feeds them to the model as context. The substance now comes from Dr. Cobb's actual teaching language, not general knowledge.
+
+**How it works:** AnythingLLM embeds your query with the native `nomic-embed-text-v1` model and runs a similarity search against the corpus (top 6 snippets, similarity threshold 0.2). The retrieved chunks appear under "Sources" beneath each response.
+
+**Embedding note:** the corpus was originally embedded with `nomic-embed-text`; the workspace queries with `nomic-embed-text-v1` — the same model family, same 768-dim vector space, so retrieval is accurate. Verified with live queries (e.g. asking about "three-dimensional core training" returns the exact Episode 301 transcript chunk).
+
+**A note on the MCP server:** the workspace also has a `qdrant-memory` MCP server. That is a separate tool — an agent scratchpad for storing/recalling notes during `@agent` sessions. It is *not* the corpus-query path and does not need to be; native RAG above handles the corpus.
