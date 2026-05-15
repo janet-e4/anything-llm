@@ -387,6 +387,10 @@ function workspaceThreadEndpoints(app) {
           user?.id || 0,
           cleanShares
         );
+        if (result === null)
+          return response
+            .status(500)
+            .json({ error: "Failed to update thread shares." });
         return response.status(200).json({ shares: result });
       } catch (e) {
         console.error(e.message, e);
