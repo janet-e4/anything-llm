@@ -4,7 +4,8 @@ Copy the full Z-Health corpus (41,041 vectors) from zhealth_research_nomic
 into zhealth_research — the collection AnythingLLM's Z-Health workspace
 actually queries for native RAG.
 
-Additive: does not touch the 7 existing vectors (the 6 working docs).
+Additive: does not touch the 7 vectors already in zhealth_research
+(6 working documents, one of which chunked into 2).
 Both collections are 768-dim / Cosine, verified before run.
 """
 import json, urllib.request, sys

@@ -52,11 +52,15 @@ Always test in a fresh browser profile or Incognito window after a frontend chan
 
 ### Backend changes
 
-The container runs the published Mintplex image with two patched files bind-mounted on top:
+The container runs the published Mintplex image (`mintplexlabs/anythingllm:1.12.1`) with three patched files bind-mounted on top, plus the storage directory and the fork's frontend build:
 
-- `~/.openclaw/anythingllm/server-index.js` → `/app/server/index.js` (Cache-Control, telemetry hardcode)
-- `~/.openclaw/anythingllm/MetaGenerator.js` → `/app/server/utils/boot/MetaGenerator.js` (no `?v=` query stamp)
+- `~/.openclaw/anythingllm/server-index.js` → `/app/server/index.js` (Cache-Control headers, telemetry forced off)
+- `~/.openclaw/anythingllm/MetaGenerator.js` → `/app/server/utils/boot/MetaGenerator.js` (emits `<script src="/index.js">` with **no** `?v=` query stamp)
 - `~/.openclaw/anythingllm/qdrant-provider.js` → `/app/server/utils/vectorDbProviders/qdrant/index.js`
+- `~/.openclaw/anythingllm/storage/` → `/app/server/storage`
+- `~/Projects/anything-llm/frontend/dist/` → `/app/server/public`
+
+(Five bind mounts total — see `~/.openclaw/anythingllm/docker-compose.yml`.)
 
 Backend changes that need to ship to production should be:
 1. Made in the fork under `server/` so the diff is reviewable in git.
@@ -96,9 +100,17 @@ If you ever feel the urge to bust the cache with a query stamp, stop and check w
 
 ---
 
+## Staying current with upstream security fixes
+
+This fork is an independent project. It does **not** chase upstream `master` for new features. The only reason to pull from upstream is a **security fix** — a patched vulnerability, a Dependabot dependency bump, or a security-relevant release.
+
+That process is not run ad-hoc. It is documented as a dedicated **skill + agent** kept on the maintainer's desktop at `~/Desktop/anythingllm-fork-maintenance/` (not in this repo — it is operational tooling, not fork code). The skill describes how to monitor upstream advisories, evaluate whether a fix applies to the fork's pinned baseline, and merge it through the branch stack. See [SECURITY.md](./SECURITY.md#staying-current-with-upstream-security-fixes) for what is monitored.
+
+When the maintenance skill determines a fix is needed, it merges `upstream/master` into `master` and then rebases the branch stack — the mechanics of that rebase are below.
+
 ## Rebasing on upstream
 
-When upstream lands changes we want, rebase from the bottom of the stack up:
+When upstream lands a security fix we need, rebase from the bottom of the stack up:
 
 ```bash
 cd ~/Projects/anything-llm
@@ -160,3 +172,13 @@ E4-only commits should generally use the `(e4)` scope so they're easy to identif
 - Bugs in upstream behavior: open an issue at https://github.com/Mintplex-Labs/anything-llm/issues
 - Bugs in E4-specific behavior: email janet@e4lv.com (do not open public issues that reference Z-Health internals)
 - Security issues: see [SECURITY.md](./SECURITY.md)
+
+---
+
+## Sources & references
+
+- Upstream contributing conventions: https://github.com/Mintplex-Labs/anything-llm/blob/master/CONTRIBUTING.md
+- Divergence baseline: commit `b1e5b6f` (AnythingLLM v1.12.1).
+- Per-feature attribution (what is fork-original vs. inherited): [docs/PROVENANCE.md](./docs/PROVENANCE.md).
+- Upstream PR draft for `feature/message-draft-autosave`: [.github/pr-draft.md](./.github/pr-draft.md) (proposed as PR #5629).
+- Upstream-security-sync skill + agent: `~/Desktop/anythingllm-fork-maintenance/` (maintainer's desktop, not in this repo).

@@ -143,3 +143,13 @@ UI smoke:
 4. Login as eric — the thread appears in his sidebar with the "Shared by jeremy" badge.
 5. Eric tries to send a message — gets blocked.
 6. Jeremy upgrades Eric to read+write — Eric can now send.
+
+---
+
+## Sources & references
+
+- Migration: `server/prisma/migrations/20260514170646_init/migration.sql` — creates `thread_drafts` and `thread_shares` (verified present; the latest migration in the fork's Prisma history).
+- Prisma models: `server/prisma/schema.prisma` — `model thread_drafts` and `model thread_shares` (both with `onDelete: Cascade` on every FK, matching the doc).
+- Feature commits on `e4/ui-customizations`: `f850ed5` (backend), `2a36755` (frontend), `a1e79fd` (`validSharedThread` middleware), `2487d70` (code-review fixes), `5b3fa72` and `45f7da8` (the two QA bug fixes).
+- This is a fork-original feature — it has no upstream equivalent. It supersedes the localStorage-only autosave from `feature/message-draft-autosave` (upstream PR #5629 candidate).
+- Live deployment is multi-user mode (`system_settings.multi_user_mode = 'true'`), so the single-user `user_id=0` sentinel path described above is dormant in production.

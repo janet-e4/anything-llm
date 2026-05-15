@@ -1,0 +1,22 @@
+# Upstream sync baseline
+# This file anchors the upstream-security-sync process. It records the last
+# upstream commit whose security-relevant changes have been triaged into this
+# fork. The scan process diffs `git log <last_synced_sha>..upstream/master`.
+#
+# See: ~/Desktop/anythingllm-fork-maintenance/  (skill + agent docs)
+# Upstream: https://github.com/Mintplex-Labs/anything-llm
+
+last_synced_sha: b1e5b6f96
+last_synced_date: 2026-05-15
+last_synced_version: v1.12.1
+notes: >
+  Fork divergence point. Fork master is in sync with upstream/master at this
+  commit. No upstream commits triaged yet beyond this baseline. On the next
+  sync, update last_synced_sha to the upstream/master SHA that was scanned,
+  and log applied/skipped commits below.
+
+# sync_log:
+#   - date: YYYY-MM-DD
+#     scanned_range: <old_sha>..<new_sha>
+#     applied: [<sha> — description]
+#     skipped: [<sha> — reason]

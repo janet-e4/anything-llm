@@ -2,7 +2,7 @@
 
 From-scratch instructions for bringing up the fork on a new machine. The production deployment lives at `~/.openclaw/anythingllm/` and is exposed publicly at https://zhealth.lvbs.com via a Cloudflare tunnel.
 
-For ongoing upgrade work (image bumps, re-embedding, override re-application) see `~/.openclaw/anythingllm/UPGRADING.md`.
+The deployment runs the published image `mintplexlabs/anythingllm:1.12.1` with five bind mounts layering the fork's customizations on top (see step 5). For ongoing upgrade work (image bumps, patched-file re-extraction, re-embedding) see `~/.openclaw/anythingllm/UPGRADING.md`. For branch/rebase mechanics see [UPGRADING.md](./UPGRADING.md).
 
 ---
 
@@ -52,41 +52,42 @@ This produces `frontend/dist/`, which Docker Compose bind-mounts into `/app/serv
 
 ### 4. Configure environment
 
-Copy or edit `~/.openclaw/anythingllm/.env`. The required variables are:
+Copy or edit `~/.openclaw/anythingllm/.env`. These are the variables the live container actually runs with (verified via `docker exec anythingllm printenv`):
 
 ```bash
-# Auth
-JWT_SECRET=<64-hex-char string>            # openssl rand -hex 32
-SIG_KEY=<random>
-SIG_SALT=<random>
+# Runtime
+ANYTHING_LLM_RUNTIME=docker
+STORAGE_DIR=/app/server/storage
 
-# Telemetry off (defense in depth alongside the server/index.js hardcode)
-DISABLE_TELEMETRY=true
+# Auth — JWT signing secret for login tokens
+JWT_SECRET=<64-hex-char string>            # openssl rand -hex 32
 
 # LLM provider — OpenClaw via generic-openai
 LLM_PROVIDER=generic-openai
 GENERIC_OPEN_AI_BASE_PATH=http://host.docker.internal:18789/v1
 GENERIC_OPEN_AI_MODEL_PREF=openclaw
 GENERIC_OPEN_AI_API_KEY=<openclaw bearer token from ~/.openclaw/openclaw.json>
-GENERIC_OPEN_AI_MAX_TOKENS=8192
+GENERIC_OPEN_AI_MAX_TOKENS=4096
+GENERIC_OPEN_AI_MODEL_TOKEN_LIMIT=128000
 
-# Embeddings — native in-container Xenova/nomic-embed-text-v1
+# Embeddings — native in-container model, 768-dim
 EMBEDDING_ENGINE=native
+EMBEDDING_MODEL_PREF=Xenova/nomic-embed-text-v1
 
 # Vector DB — Qdrant on host
 VECTOR_DB=qdrant
 QDRANT_ENDPOINT=http://host.docker.internal:6333
-
-# Storage location
-STORAGE_DIR=/app/server/storage
+QDRANT_API_KEY=                            # empty — local Qdrant has no auth
 ```
 
-Generate fresh secrets if this is a brand-new deployment:
+Notes:
+- `DISABLE_TELEMETRY` does **not** need to be set here — the patched `server/index.js` forces `process.env.DISABLE_TELEMETRY = "true"` at startup before any module loads (see [SECURITY.md](./SECURITY.md#telemetry)). Setting it in `.env` as well is harmless belt-and-suspenders but not required.
+- There are **no** `SIG_KEY` / `SIG_SALT` variables in this deployment — AnythingLLM 1.12.1 does not use them. Do not add them.
+
+Generate the JWT secret for a brand-new deployment:
 
 ```bash
 echo "JWT_SECRET=$(openssl rand -hex 32)" >> ~/.openclaw/anythingllm/.env
-echo "SIG_KEY=$(openssl rand -hex 32)" >> ~/.openclaw/anythingllm/.env
-echo "SIG_SALT=$(openssl rand -hex 32)" >> ~/.openclaw/anythingllm/.env
 ```
 
 Never commit this file. See [SECURITY.md](./SECURITY.md) for the complete secret inventory.
@@ -99,7 +100,17 @@ docker compose up -d
 docker compose logs -f anythingllm
 ```
 
-The compose file bind-mounts the patched files described in [CONTRIBUTING.md](./CONTRIBUTING.md) plus `~/Projects/anything-llm/frontend/dist` -> `/app/server/public`.
+The compose file (`~/.openclaw/anythingllm/docker-compose.yml`) runs `mintplexlabs/anythingllm:1.12.1` with **five** bind mounts:
+
+| Host path | Container path | Purpose |
+|---|---|---|
+| `./storage` | `/app/server/storage` | DB, documents, models, plugins, agent flows |
+| `./qdrant-provider.js` | `/app/server/utils/vectorDbProviders/qdrant/index.js` | Patched Qdrant provider |
+| `~/Projects/anything-llm/frontend/dist` | `/app/server/public` | Fork frontend build |
+| `./server-index.js` | `/app/server/index.js` | Cache-Control headers + telemetry forced off |
+| `./MetaGenerator.js` | `/app/server/utils/boot/MetaGenerator.js` | Emits `<script src="/index.js">` with **no** `?v=` query stamp |
+
+The three `.js` override files must already exist in `~/.openclaw/anythingllm/` before the first `up`. On a brand-new machine they are produced by extracting the originals from the image and re-applying the patches — see `~/.openclaw/anythingllm/UPGRADING.md` ("Custom overrides preserved across upgrades"). Note: the `MetaGenerator.js` comment in `docker-compose.yml` is stale — it says the file "appends index.js mtime as `?v=`", but the actual patched file does the **opposite** (it removes the query stamp; the `?v=` stamp caused React error #321).
 
 ### 6. Verify
 
@@ -108,7 +119,7 @@ curl http://localhost:3001/api/ping
 # expected: {"online":true}
 ```
 
-Then open http://localhost:3001 in a browser. If the page loads but the UI is broken, see "Recovering from issues" below.
+The container healthcheck also hits `/api/ping`; `docker ps` should show `(healthy)` within ~60s. Then open http://localhost:3001 in a browser. If the page loads but the UI is broken, see "Recovering from issues" below.
 
 ### 7. Set up the Cloudflare tunnel (production only)
 
@@ -151,7 +162,31 @@ On first boot the container auto-creates `storage/anythingllm.db` (SQLite) if it
        "UPDATE system_settings SET value='true' WHERE label='multi_user_mode';"
      docker compose restart anythingllm
      ```
-3. Create additional admin and default-role users via Settings -> Users. Document credentials in `~/.openclaw/anythingllm/UPGRADING.md` (which is gitignored).
+3. Create additional admin and default-role users via Settings -> Users. The live deployment has three accounts — two `admin` (`jeremy`, `nick`) and one `default` (`eric`). Document credentials in `~/.openclaw/anythingllm/UPGRADING.md` (which is gitignored).
+4. Create the workspaces. The live deployment has two: **Z-Health Knowledge Base** (slug `zhealth_research`) and **General Chat** (slug `general-chat`).
+
+---
+
+## Z-Health corpus setup
+
+The **Z-Health Knowledge Base** workspace does RAG against the Qdrant collection `zhealth_research`. That collection must hold the Z-Health corpus before the workspace is useful.
+
+Provenance of the corpus: 41,041 vectors of zhealtheducation.com blog posts, podcast episode transcripts, and video transcripts (with speaker/timestamp metadata), embedded with the `nomic-embed-text` family, 768-dim. The canonical copy is the backup collection `zhealth_research_nomic` (41,041 points).
+
+`zhealth_research` is populated from that backup using `docs/z-health/zh-corpus-copy.py`, which batch-copies all points from `zhealth_research_nomic` into `zhealth_research` additively (it does not disturb documents uploaded through the UI):
+
+```bash
+python3 ~/Projects/anything-llm/docs/z-health/zh-corpus-copy.py
+```
+
+After the copy, `zhealth_research` holds **41,048 points** — the 41,041-vector corpus plus the 7 working documents uploaded through the workspace UI. Verify:
+
+```bash
+curl -s http://localhost:6333/collections/zhealth_research | grep -o '"points_count":[0-9]*'
+# expected: "points_count":41048
+```
+
+Both collections are 768-dim / Cosine. The workspace queries with the native `Xenova/nomic-embed-text-v1` model (same family, same vector space as the corpus's embedding model) — see `docs/z-health/COMMAND_GUIDE.md` for the corpus/RAG details.
 
 ---
 
@@ -178,7 +213,7 @@ Symptom: white screen, console shows `Minified React error #321`. Cause: two Rea
 Fix:
 1. Inspect the served `index.html`: `curl -s http://localhost:3001/ | grep index.js`. The `<script>` tag must reference `/index.js` with **no query string**.
 2. If there's a `?v=` stamp, find and remove the postbuild script or `MetaGenerator.js` change that added it. The fork's `MetaGenerator.js` patch (bind-mounted from `~/.openclaw/anythingllm/MetaGenerator.js`) emits the bare URL.
-3. Verify the Cache-Control headers: `curl -I http://localhost:3001/index.js` should show `Cache-Control: no-cache`.
+3. Verify the Cache-Control headers: `curl -I http://localhost:3001/index.js` should show `Cache-Control: no-cache, must-revalidate`. Hashed assets (e.g. `/index-a5168934.js`) get `public, max-age=31536000, immutable`.
 4. Rebuild the frontend, restart the container, and hard-refresh in Incognito.
 
 ### Cache stuck on old assets
@@ -220,4 +255,14 @@ Inside the container, the gateway must be reachable as `host.docker.internal:187
 | Re-embedding documents | `~/.openclaw/anythingllm/UPGRADING.md` -> "Re-embedding after embedding engine change" |
 | Adding / editing a Z-Health agent flow | `~/.openclaw/anythingllm/storage/plugins/agent-flows/README.md` |
 | Rotating secrets | [SECURITY.md](./SECURITY.md) |
-| Rebasing on upstream | [CONTRIBUTING.md](./CONTRIBUTING.md) |
+| Rebasing on upstream (branch mechanics) | [UPGRADING.md](./UPGRADING.md) and [CONTRIBUTING.md](./CONTRIBUTING.md) |
+
+---
+
+## Sources & references
+
+- Compose file and bind-mount definitions: `~/.openclaw/anythingllm/docker-compose.yml`.
+- Live env vars verified against `docker exec anythingllm printenv` (image `mintplexlabs/anythingllm:1.12.1`).
+- Z-Health corpus origin and the copy script: `docs/z-health/COMMAND_GUIDE.md`, `docs/z-health/zh-corpus-copy.py`.
+- Patched files: `~/.openclaw/anythingllm/server-index.js`, `MetaGenerator.js`, `qdrant-provider.js`.
+- Divergence baseline: AnythingLLM v1.12.1, commit `b1e5b6f`. See [docs/PROVENANCE.md](./docs/PROVENANCE.md).

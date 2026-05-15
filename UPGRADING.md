@@ -1,101 +1,120 @@
-# AnythingLLM — Upgrade & Maintenance Runbook
+# Upgrading — Branch & Rebase Mechanics
 
-Config root: `~/.openclaw/anythingllm/`  
-Web UI: http://localhost:3001  
-Source fork: https://github.com/janet-e4/anything-llm (branch: `feature/message-draft-autosave`)
+This document covers the **git side** of keeping the fork current: how the branch
+stack is structured and how to rebase it when an upstream security fix needs to
+land. For the **deployment side** — Docker image bumps, re-extracting and
+re-patching the bind-mounted server files, re-embedding the Qdrant corpus,
+account management — see the deployment-specific runbook at
+`~/.openclaw/anythingllm/UPGRADING.md`.
 
----
-
-## Standard image upgrade
-
-1. Stop the container:
-   ```bash
-   cd ~/.openclaw/anythingllm
-   docker compose down
-   ```
-
-2. Update the image tag in `docker-compose.yml`:
-   ```yaml
-   image: mintplexlabs/anythingllm:<new-version>
-   ```
-
-3. Pull and restart:
-   ```bash
-   docker compose pull
-   docker compose up -d
-   docker compose logs -f anythingllm
-   ```
-
-4. Verify the UI loads at http://localhost:3001 and a test message works.
+The two documents are complementary: do the branch work here first, then follow
+the deployment runbook to ship the result.
 
 ---
 
-## Upgrading from the local fork (autosave feature)
+## Why the fork pulls from upstream at all
 
-When the image tag is replaced with a build from the local fork:
-
-1. Fetch upstream changes:
-   ```bash
-   cd ~/Projects/anything-llm
-   git fetch upstream
-   ```
-
-2. Rebase the feature branch:
-   ```bash
-   git checkout feature/message-draft-autosave
-   git rebase upstream/master
-   ```
-   Conflicts will only be in:
-   - `frontend/src/hooks/useDraftMessage.js` (new file — no conflict)
-   - `frontend/src/components/WorkspaceChat/ChatContainer/PromptInput/index.jsx`
-
-3. Rebuild and restart:
-   ```bash
-   cd ~/.openclaw/anythingllm
-   docker compose up -d --build --no-cache
-   docker compose logs -f anythingllm
-   ```
-
-4. Verify autosave works: type a message, refresh, confirm draft is restored.
+The E4 fork is an **independent project**. It diverged from upstream AnythingLLM
+at commit `b1e5b6f` (v1.12.1) and does **not** chase `upstream/master` for new
+features. The only reason to pull from upstream is a **security fix**. The
+decision of *whether* a given upstream change is a security fix worth taking is
+made by the upstream-security-sync skill + agent (see
+[SECURITY.md](./SECURITY.md#staying-current-with-upstream-security-fixes)). This
+document assumes that decision has already been made and a rebase is needed.
 
 ---
 
-## Re-embedding after embedding engine change
+## Branch stack
 
-**Context:** The embedding engine was switched from `ollama/nomic-embed-text` (768-dim)
-to `native` (384-dim). Existing Qdrant vectors are incompatible and must be regenerated.
+```
+master                              (mirror of upstream/master, currently @ b1e5b6f)
+  └─ feature/message-draft-autosave (upstream PR #5629 candidate, tip ec996ce)
+        └─ e4/ui-customizations    (deployed branch, ~20 commits ahead of b1e5b6f)
+```
 
-**Steps:**
-
-1. In the AnythingLLM UI → go to each Workspace → Documents tab.
-2. Remove (un-embed) all currently embedded documents.
-3. Re-add them. AnythingLLM will re-embed using the native engine.
-4. Verify search/RAG works in a test message.
-
-Affected documents (as of 2026-05-14):
-- `test-zhealth-doc.txt` (custom-documents)
-- Files in `direct-uploads/` (ZHealth emails, newsletter drafts, option docs)
-
-The ZHealth custom agent skill (`zhealth-knowledge-query`) queries Qdrant collection
-`zhealth_mcp_memory` — that collection is managed by the MCP server (fastembed,
-sentence-transformers/all-MiniLM-L6-v2, 384-dim) and is **not affected** by this change.
+- **`master`** — never edited directly. Fast-forwarded to `upstream/master`.
+- **`feature/message-draft-autosave`** — the provider-error message-recovery
+  change, kept narrow and provider-agnostic so it can be sent upstream as a PR.
+- **`e4/ui-customizations`** — everything else: branding removal, telemetry-off,
+  the display panel, the DB-backed thread drafts + sharing feature, and the
+  Z-Health customizations. This is the only branch ever built and deployed.
 
 ---
 
-## Custom overrides preserved across upgrades
+## Rebase procedure
 
-| What | Host path | Container path |
-|---|---|---|
-| Storage (DB, docs, plugins) | `./storage/` | `/app/server/storage` |
-| Custom Qdrant provider | `./qdrant-provider.js` | `/app/server/utils/vectorDbProviders/qdrant/index.js` |
+Run from `~/Projects/anything-llm`. Rebase from the bottom of the stack up.
 
-These are bind-mounted — they survive any image upgrade automatically.
+```bash
+git fetch upstream
+
+# 1. Fast-forward master to the new upstream tip
+git checkout master
+git merge --ff-only upstream/master
+
+# 2. Rebase the feature branch onto the new master
+git checkout feature/message-draft-autosave
+git rebase master
+# Expected conflict hotspots:
+#   frontend/src/hooks/usePromptInputStorage.js
+#   frontend/src/components/WorkspaceChat/ChatContainer/index.jsx
+
+# 3. Rebase the E4 branch onto the new feature branch
+git checkout e4/ui-customizations
+git rebase feature/message-draft-autosave
+# Expected conflict hotspots — anything Mintplex touched in:
+#   frontend/src/components/Sidebar
+#   frontend/src/components/SettingsSidebar
+#   frontend/src/pages/GeneralSettings
+#   server/prisma/schema.prisma   (the thread_drafts / thread_shares models)
+```
+
+If the upstream fix added a Prisma migration, the fork's draft/share migration
+(`server/prisma/migrations/20260514170646_init/`) must remain the **last**
+migration in timestamp order. Reorder if necessary so `prisma migrate` applies
+the upstream migration before the fork's.
 
 ---
 
-## LLM provider
+## After a rebase
 
-AnythingLLM uses OpenClaw (port 18789) as its LLM backend via the generic-openai provider.
-All provider config lives in `.env` (gitignored). Never hard-code keys in `docker-compose.yml`.
+```bash
+# Build the frontend
+cd ~/Projects/anything-llm/frontend && npm run build
 
-Health check: `curl http://localhost:18789/health` → `{"ok":true,"status":"live"}`
+# Restart the deployed container (picks up the new frontend/dist bind mount)
+cd ~/.openclaw/anythingllm && docker compose restart anythingllm
+```
+
+If the upstream fix touched `server/index.js` or
+`server/utils/boot/MetaGenerator.js`, the patched bind-mounted copies in
+`~/.openclaw/anythingllm/` must be regenerated — see
+`~/.openclaw/anythingllm/UPGRADING.md` ("Custom overrides preserved across
+upgrades"). A frontend-only fix needs only the `npm run build` + restart above.
+
+Verify in the browser: log in, send a test message, confirm the display-settings
+panel renders, confirm no Mintplex links have reappeared, confirm thread drafts
+still save.
+
+---
+
+## Pushing
+
+The branches are private to E4, so a rebase requires a force push. Use
+`--force-with-lease` to avoid clobbering work:
+
+```bash
+git push --force-with-lease origin master
+git push --force-with-lease origin feature/message-draft-autosave
+git push --force-with-lease origin e4/ui-customizations
+```
+
+---
+
+## Sources & references
+
+- Divergence baseline: commit `b1e5b6f`, AnythingLLM v1.12.1.
+- Branch strategy and what-goes-where: [CONTRIBUTING.md](./CONTRIBUTING.md).
+- Security-fix monitoring and the sync skill: [SECURITY.md](./SECURITY.md).
+- Deployment-side upgrade runbook: `~/.openclaw/anythingllm/UPGRADING.md`.
+- Per-feature provenance: [docs/PROVENANCE.md](./docs/PROVENANCE.md).
