@@ -101,8 +101,20 @@ Workspace-slug-only drafts (typed before any thread exists) are *not* migrated �
 - **SQLite `createMany` not supported** — `ThreadShare.setShares` uses a `$transaction` of single `create` calls instead. Postgres builds could swap back to `createMany` for efficiency.
 - **No notification on share** — recipients see the shared thread next time they fetch their thread list. No push/email yet.
 - **Owner transfer not implemented** — if the original owner is deleted, their threads cascade-delete (and so do all drafts and shares).
-- **Read-only UI** — server enforces the gate (HTTP 403). The frontend UI hides the send button when permission='read', but the server is the source of truth.
+- **Read-only UI** — server enforces the gate (HTTP 403). The frontend UI disables the send button when permission='read', but the server is the source of truth.
 - **Single-user mode (no MUM)** — drafts use `user_id=0` as a sentinel. Sharing is a no-op since there's only one user.
+- **Read-only users + drafts** — a read-only viewer's `PUT /draft` returns 403 (server correctly rejects). The frontend still attempts the call on mount, producing a harmless 403 in the browser console. Read-only users get localStorage-only drafts. Not a functional defect.
+- **Presence polls on all threads** — `useThreadPresence` runs on every thread with a slug, even unshared private ones (always returns empty). Negligible load for small deployments; could be gated on share-existence later.
+
+## Bugs found in QA and fixed
+
+The feature went through a code review + edge-case + browser-UI testing pass. Two real bugs were caught and fixed:
+
+1. **Share data loss on duplicate/invalid `user_id`** (HIGH) — `ThreadShare.setShares` ran `deleteMany` *outside* the `$transaction`. A failed recreate (duplicate user in the array, or a non-existent `user_id` hitting the FK) wiped every existing share with no rollback, and the endpoint returned HTTP 200. Fixed: de-dupe the incoming list by `user_id`, validate ids against the users table (skip unknowns), move `deleteMany` inside the transaction, and return 500 on `null`. Commit `5b3fa72`.
+
+2. **Shared users couldn't read thread chat history** (HIGH) — `GET .../chats` used `validWorkspaceAndThreadSlug` (user-id filtered) → 404 for shared viewers; and `WorkspaceChats.where` filtered by the caller's id so even past the middleware they'd see an empty history. Fixed: use `validSharedThread`, and query history by the thread *owner's* `user_id`. Commit `45f7da8`.
+
+Both were caught only because the QA pass tested destructive/cross-user paths, not just the happy path.
 
 ---
 
