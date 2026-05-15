@@ -154,7 +154,10 @@ export default function usePromptInputStorage({ promptInput, setPromptInput }) {
 
   useEffect(() => {
     debouncedWrite(promptInput);
-    return () => debouncedWrite.cancel();
+    // On cleanup, flush any pending write so the final edit is not lost when
+    // the user navigates away (thread switch / unmount) before the debounce
+    // interval elapses.
+    return () => debouncedWrite.flush();
   }, [promptInput, debouncedWrite]);
 }
 

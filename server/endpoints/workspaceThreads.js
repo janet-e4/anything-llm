@@ -366,7 +366,27 @@ function workspaceThreadEndpoints(app) {
         const thread = response.locals.thread;
         if (user?.id && thread.user_id !== user.id) return response.sendStatus(403).end();
 
-        const result = await ThreadShare.setShares(thread.id, user?.id || 0, shares);
+        // Validate the shape of the shares payload before handing to the model.
+        if (!Array.isArray(shares))
+          return response.status(400).json({ error: "shares must be an array" });
+        const cleanShares = [];
+        for (const s of shares) {
+          const userId = Number(s?.user_id);
+          if (!Number.isInteger(userId) || userId <= 0)
+            return response
+              .status(400)
+              .json({ error: "each share requires a valid numeric user_id" });
+          cleanShares.push({
+            user_id: userId,
+            permission: s?.permission === "write" ? "write" : "read",
+          });
+        }
+
+        const result = await ThreadShare.setShares(
+          thread.id,
+          user?.id || 0,
+          cleanShares
+        );
         return response.status(200).json({ shares: result });
       } catch (e) {
         console.error(e.message, e);
