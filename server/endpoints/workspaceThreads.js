@@ -161,17 +161,20 @@ function workspaceThreadEndpoints(app) {
     [
       validatedRequest,
       flexUserRoleValid([ROLES.all]),
-      validWorkspaceAndThreadSlug,
+      validWorkspaceSlug,
+      validSharedThread,
     ],
     async (request, response) => {
       try {
-        const user = await userFromSession(request, response);
         const workspace = response.locals.workspace;
         const thread = response.locals.thread;
+        // Chat history belongs to the thread OWNER. For a shared thread the
+        // viewer is a different user, so we always query by the thread's
+        // owner user_id (thread.user_id) — not the caller's id.
         const history = await WorkspaceChats.where(
           {
             workspaceId: workspace.id,
-            user_id: user?.id || null,
+            user_id: thread.user_id || null,
             thread_id: thread.id,
             api_session_id: null, // Do not include API session chats.
             include: true,
