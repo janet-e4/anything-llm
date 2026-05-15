@@ -22,48 +22,9 @@ const { getModelTag } = require("./utils");
 const prisma = require("../utils/prisma");
 const { ThreadDraft } = require("../models/threadDraft");
 const { ThreadShare } = require("../models/threadShare");
-
-// Helper: validate workspace and thread, but allow shared threads too.
-// Sets response.locals.thread and response.locals.permission ('read'|'write').
-async function validSharedThread(request, response, next) {
-  const { threadSlug } = request.params;
-  const workspace = response.locals.workspace;
-  const user = await userFromSession(request, response);
-  if (!workspace || !threadSlug) return response.sendStatus(400).end();
-
-  const thread = await prisma.workspace_threads.findFirst({
-    where: { slug: threadSlug, workspace_id: workspace.id },
-  });
-  if (!thread) return response.sendStatus(404).end();
-
-  // Owner check
-  if (user?.id && thread.user_id === user.id) {
-    response.locals.thread = thread;
-    response.locals.permission = "write";
-    return next();
-  }
-
-  // Shared check
-  if (user?.id) {
-    const share = await prisma.thread_shares.findUnique({
-      where: { thread_id_shared_with_id: { thread_id: thread.id, shared_with_id: user.id } },
-    });
-    if (share) {
-      response.locals.thread = thread;
-      response.locals.permission = share.permission;
-      return next();
-    }
-  }
-
-  // Single-user mode: allow if thread has no user_id
-  if (!user && !thread.user_id) {
-    response.locals.thread = thread;
-    response.locals.permission = "write";
-    return next();
-  }
-
-  return response.sendStatus(404).end();
-}
+const {
+  validSharedThread,
+} = require("../utils/middleware/validSharedThread");
 
 function workspaceThreadEndpoints(app) {
   if (!app) return;

@@ -9,14 +9,16 @@ const ThreadShare = {
     try {
       await prisma.thread_shares.deleteMany({ where: { thread_id: threadId } });
       if (shareList.length === 0) return [];
-      await prisma.thread_shares.createMany({
-        data: shareList.map((s) => ({
-          thread_id: threadId,
-          shared_with_id: s.user_id,
-          shared_by_id: sharedById,
-          permission: s.permission === "write" ? "write" : "read",
-        })),
-      });
+      // SQLite Prisma client may not support createMany — use individual creates in a transaction.
+      const rows = shareList.map((s) => ({
+        thread_id: threadId,
+        shared_with_id: s.user_id,
+        shared_by_id: sharedById,
+        permission: s.permission === "write" ? "write" : "read",
+      }));
+      await prisma.$transaction(
+        rows.map((data) => prisma.thread_shares.create({ data }))
+      );
       return await this.getSharesForThread(threadId);
     } catch (e) {
       console.error("ThreadShare.setShares", e.message);
